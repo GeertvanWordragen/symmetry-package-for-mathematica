@@ -1,0 +1,1 @@
+Accompanying Mathematica code for my bachelor's thesis [Mathematica algorithms for detection of symmetry in bounded 2D and 3D shapes](https://research.tue.nl/en/studentTheses/mathematica-algorithms-for-detection-of-symmetry-in-bounded-2d-an), supervised by Tom Verhoeff and Rob Eggermont in 2019.
