@@ -16,11 +16,11 @@
 BeginPackage["Symmetry`"];
 
 
-(* ::Subsection:: *)
+(* ::Subsection::Closed:: *)
 (*Usage Messages*)
 
 
-(* ::Subsubsection:: *)
+(* ::Subsubsection::Closed:: *)
 (*Symmetry*)
 
 
@@ -49,7 +49,7 @@ SymmetryTransformation::usage =
 	describing the symmetry of the given (2D or 3D) boundary mesh.";
 
 
-(* ::Subsubsection:: *)
+(* ::Subsubsection::Closed:: *)
 (*TransformationGroup*)
 
 
@@ -79,11 +79,14 @@ ReflectionPlane::usage = "";
 
 TransformationPrimitive::usage = "";
 
+PolyhedronSymmetry::usage = "";
+MeshGraph::usage="";
+
 
 Begin["`Private`"];
 
 
-(* ::Subsection:: *)
+(* ::Subsection::Closed:: *)
 (*Options*)
 
 
@@ -92,6 +95,7 @@ With[{
 		Tolerance -> 10^-6,
 		WorkingPrecision -> Automatic,
 		AdditionalData -> None,
+		DataReflection -> Identity,
 		SameTest -> Equal
 	}},
 	Options[SymmetryPermutation] = options;
@@ -108,7 +112,7 @@ With[{
 ]
 
 
-(* ::Subsection:: *)
+(* ::Subsection::Closed:: *)
 (*Function definitions*)
 
 
@@ -168,7 +172,7 @@ BoundaryMeshSymmetry[m_BoundaryMeshRegion, asGroup_?BooleanQ, ops:OptionsPattern
 	]
 
 
-(* ::Subsection:: *)
+(* ::Subsection::Closed:: *)
 (*Helper functions*)
 
 
@@ -185,10 +189,10 @@ PolygonCoordinatesOrdered[p_Polygon] :=
 *)
 SequencePositionTest[list_List, sublist_List, SameTest_, n_Integer:Infinity] :=
 	If[SameTest === Equal,
-		SequencePosition[list, sublist],
+		SequencePosition[list, sublist, n],
 	
 		With[{len = Length[sublist]},
-			SequencePosition[list, x_List /; ListEqual[sublist, x, len, SameTest]]
+			SequencePosition[list, x_List /; ListEqual[sublist, x, len, SameTest], n]
 		]
 	]
 
@@ -225,7 +229,7 @@ GetAllCyclicOffsets[S_List, S2_List, SameTest_] :=
 	pre: x has a dot product
 	ret: the squared norm of x
 *)
-NormSqr[x_] := x.x
+NormSqr[x_] := x . x
 
 (*
 	pre: x is a number or a list of numbers
@@ -257,11 +261,11 @@ ExtractTolerance[tolerance_, workingPrecision_] :=
 		];
 
 
-(* ::Subsection:: *)
+(* ::Subsection::Closed:: *)
 (*2D*)
 
 
-(* ::Subsubsection:: *)
+(* ::Subsubsection::Closed:: *)
 (*Polygon*)
 
 
@@ -288,6 +292,7 @@ PolygonSymmetry[P_List, asGroup_?BooleanQ, ops:OptionsPattern[]] := With[{
 		S = PolygonEncode[Pc, OptionValue[AdditionalData], workingPrecision];
 		k = GetCyclicOffset[S, S, sameTest];
 		j = PolygonReflection[S, k, PolygonReverse, sameTest];
+		(* NB: as opposed to the paper, j is an offset instead of an index. *)
 	
 		If[asGroup,
 			PermutationGroup@Append[
@@ -346,8 +351,8 @@ PolygonReverse[S_List, length_Integer] := With[{n = Length[S]},
 		Rev a function that lets S's polygon be traversed in opposite direction
 	ret: all index shifts that make S equal to its reversed variant
 *)
-PolygonReflection[S_List, k_Integer, Rev_Symbol, SameTest_] :=
-	k - Map[First, GetAllCyclicOffsets[Rev[S, k], S[[1 ;; k]], SameTest]]
+PolygonReflection[S_List, k_Integer, Rev_, SameTest_] :=
+	Map[First, GetAllCyclicOffsets[S[[1 ;; k]], Rev[S, k], SameTest]]
 
 
 (* 
@@ -369,7 +374,7 @@ PolygonSameTest[distTolerance_, angleTolerance_, SameTest_][a_List, b_List] :=
 GetReflectionCycle[n_Integer][j_Integer] :=
 	Cycles@Table[
 		{i, Mod[2 + j - i, n, 1]},
-		{i, Floor[(j + 4) / 2], Ceiling[(j + n) / 2]}
+		{i, Floor[j / 2] + 2, Ceiling[(n + j) / 2]}
 	]
 
 GetReflectionTransform[centroid_List, S_List, n_Integer][j_Integer] := With[{
@@ -386,7 +391,7 @@ GetReflectionTransform[centroid_List, S_List, n_Integer][j_Integer] := With[{
 GetReflectionElement[S_List, index_Integer, n_Integer] :=
 	If[EvenQ[index],
 		S[[1 + index / 2]],
-		(S[[Mod[(index + 1) / 2, n, 1]]] + S[[Mod[(index + 3) / 2, n, 1]]]) / 2
+		(S[[1 + (index - 1) / 2]] + S[[Mod[1 + (index + 1) / 2, n, 1]]]) / 2
 	]
 
 (*
@@ -410,7 +415,7 @@ GetRotationTransform[centroid_List, k_Integer, n_Integer] :=
 	]
 
 
-(* ::Subsubsection:: *)
+(* ::Subsubsection::Closed:: *)
 (*Point Set*)
 
 
@@ -428,30 +433,34 @@ PointSetSymmetry2D[P_List, asGroup_?BooleanQ, ops:OptionsPattern[]] := With[{
 		{distTolerance, angleTolerance} = ExtractTolerance[
 			OptionValue[Tolerance], workingPrecision
 		];
-		Same = PointSetSameTest[angleTolerance];
+		Same = If[OptionValue[DataReflection] === Identity,
+			PointSetSameTest[angleTolerance],
+			PointSetSameTest[angleTolerance, OptionValue[SameTest]]
+		];
 		
 		Pc = Map[# - centroid &, P];
 		{\[CapitalGamma], S, ordering} = PointSetEncode[
 			Pc, OptionValue[AdditionalData],
 			workingPrecision, distTolerance,
-			OptionValue[SameTest]
+			OptionValue[SameTest],
+			OptionValue[DataReflection] =!= Identity
 		];
 		
 		o = Map[
-			Length[#] / GetCyclicOffset[#, #, Same]&,
+			Length[#] / GCD[Length[#], GetCyclicOffset[#, #, Same]]&,
 			S
 		];
 		k = Apply[GCD, o];
 
 		axes = MapThread[
-			PointSetReflection[1, workingPrecision, Same],
+			PointSetReflection[k, workingPrecision, Same, OptionValue[DataReflection]],
 			{\[CapitalGamma], S}
 		];
 		
 		If[asGroup,
 			With[{total = Length[axes]},
 				axes = Flatten[axes, 1];
-				axes = Gather[axes, Abs[First[#1] - First[#2]] <= angleTolerance&];
+				axes = Gather[axes, Abs@Mod[First[#1] - First[#2], \[Pi]/k, -\[Pi]/(2k)] <= angleTolerance&];
 				axes = Select[axes, Length[#] == total&];
 				axes = Map[#[[2]]&, axes, {2}];
 			];
@@ -462,7 +471,7 @@ PointSetSymmetry2D[P_List, asGroup_?BooleanQ, ops:OptionsPattern[]] := With[{
 			
 			axes = Map[First, axes, {2}];
 			axes = Apply[
-				Intersection[##, SameTest -> (Abs[#1 - #2] <= angleTolerance &)]&,
+				Intersection[##, SameTest -> (Abs@Mod[#1 - #2, \[Pi]/k, -\[Pi]/(2k)] <= angleTolerance &)]&,
 				axes
 			];
 			TransformationGroup@Append[
@@ -474,14 +483,14 @@ PointSetSymmetry2D[P_List, asGroup_?BooleanQ, ops:OptionsPattern[]] := With[{
 ]
 
 
-PointSetEncode[P_List, D_, precision_, distTolerance_, SameTest_] := Block[{
+PointSetEncode[P_List, D_, precision_, distTolerance_, SameTest_, reflData_] := Block[{
 		PD, \[CapitalGamma], S, ordering, SameDist
 	},
 	PD = MapIndexed[Append[#1, First[#2]]&, P];
 	SameDist[x_List, y_List] :=
 		Prec[Abs[Norm[x[[1;;2]]] - Norm[y[[1;;2]]]], precision] <= distTolerance;
 		
-	If[D === None,
+	If[D === None \[Or] reflData,
 		\[CapitalGamma] = Gather[PD, SameDist],
 		
 		PD = MapThread[Append[#1, #2]&, {PD, D}];
@@ -489,18 +498,23 @@ PointSetEncode[P_List, D_, precision_, distTolerance_, SameTest_] := Block[{
 	];
 	\[CapitalGamma] = DeleteCases[\[CapitalGamma], x_/; NormSqr[x[[1, 1;;2]]] <= distTolerance^2, {1}];
 	\[CapitalGamma] = Map[{ArcTan[#[[1]], #[[2]]], #[[3]]}&, \[CapitalGamma], {2}];
-	\[CapitalGamma] = SortBy[#, N@First[#]&] &/@ \[CapitalGamma];
+	\[CapitalGamma] = SortBy[#, First, NumericalOrder] &/@ \[CapitalGamma];
 		
 	ordering = Map[#[[2]]&, \[CapitalGamma], {2}];
 	\[CapitalGamma] = Map[First, \[CapitalGamma], {2}];
 	
 	S = Map[PointSetEncodeCycle[precision], \[CapitalGamma]];
+	If[reflData,
+		S = MapThread[MapThread[Combine[D], {#1, #2}]&, {S, ordering}]
+	];
 	{\[CapitalGamma], S, ordering}
 ]
 
+Combine[data_List][x_, index_] := {x, data[[index]]}
+
 PointSetEncodeCycle[precision_][cycle_List] := With[{n = Length[cycle]},
 	Table[
-		Prec[Mod[cycle[[j]] - cycle[[Mod[j - 1, n, 1]]], 2\[Pi]], precision],
+		Prec[Mod[cycle[[Mod[j + 1, n, 1]]] - cycle[[j]], 2\[Pi]], precision],
 		{j, n}
 	]
 ]
@@ -511,19 +525,26 @@ PointSetEncodeCycle[precision_][cycle_List] := With[{n = Length[cycle]},
 	ret: test for the equality of angles
 *)
 PointSetSameTest[0] := Equal
+PointSetSameTest[0, Equal] := Equal
 PointSetSameTest[angleTolerance_][a_, b_] :=
 	Abs[a - b] <= angleTolerance
+PointSetSameTest[angleTolerance_, SameTest_][a_, b_] :=
+	Abs[a[[1]] - b[[1]]] <= angleTolerance \[And] SameTest[a[[2]], b[[2]]]
 
 
-PointSetReverse[P_List, length_Integer] := With[{n = Length[P]},
-	Prepend[P[[n ;; n - length + 2 ;; -1]], P[[1]]]
+PointSetReverse[Identity][P_List, length_Integer] := P[[length ;; 1 ;; -1]]
+PointSetReverse[DataReflection_][P_List, length_Integer] := With[{n = Length[P]},
+	Table[
+		{
+			P[[n - i + 1, 1]],
+			DataReflection[P[[Mod[n - i + 2, n, 1], 2]]]
+		},
+		{i, length}
+	]
 ]
 
-PointSetReflection[k_Integer, precision_, SameTest_][\[CapitalGamma]_List, S_List] := With[{
-		j = If[Length[S] == 2,
-			PolygonReflection[S[[{1, 1}]], 2 / k, PointSetReverse, SameTest],
-			PolygonReflection[S, Length[S] / k, PointSetReverse, SameTest]
-		]
+PointSetReflection[k_Integer, precision_, SameTest_, DataReflection_][\[CapitalGamma]_List, S_List] := With[{
+		j = PolygonReflection[S, Length[S] / k, PointSetReverse[DataReflection], SameTest]
 	},
 	Map[GetReflAngle[\[CapitalGamma], precision], j]
 ]
@@ -531,7 +552,7 @@ PointSetReflection[k_Integer, precision_, SameTest_][\[CapitalGamma]_List, S_Lis
 GetReflAngle[\[CapitalGamma]_List, precision_][index_Integer] := With[{
 		\[Alpha] = GetReflectionElement[\[CapitalGamma], index, Length[\[CapitalGamma]]]
 	},
-	{Prec[Mod[\[Alpha], \[Pi]], precision], index}
+	{Prec[\[Alpha], precision], index}
 ]
 
 AngleAtIndex[\[CapitalGamma]_List, index_Integer, n_Integer] := With[{
@@ -573,57 +594,66 @@ PointSetRotationTransform[centroid_List, k_Integer] :=
 	]
 
 
-(* ::Subsubsection:: *)
+(* ::Subsubsection::Closed:: *)
 (*Mesh*)
 
 
 MeshSymmetry2D[m_MeshRegion, asGroup_?BooleanQ, ops:OptionsPattern[]] := Block[{
-		v, g, data, Same, workingPrecision, distTolerance, angleTolerance},
+		v, g, data, Same, workingPrecision, distTolerance, ReflFunc},
 	v = MeshCoordinates[m];
 	g = MeshGraph[m];
 	
 	workingPrecision = ExtractWorkingPrecision[OptionValue[WorkingPrecision], v];
-	{distTolerance, angleTolerance} = ExtractTolerance[
+	distTolerance = First@ExtractTolerance[
 		OptionValue[Tolerance], workingPrecision
 	];
 	
-	data = Map[EncodeMeshConnections[v, g, RegionCentroid[m]], Range[Length[v]]];
-	Same = MeshEqual[distTolerance, angleTolerance];
+	data = Map[EncodeMeshConnections[v, g, Mean[v], distTolerance], Range[Length[v]]];
 	
-	If[OptionValue[AdditionalData] =!= None,		
+	If[OptionValue[AdditionalData] =!= None,
 		data = MapThread[{#1, #2}&, {data, OptionValue[AdditionalData]}];
-		Same = Same[#1[[1]], #2[[1]]] \[And] OptionValue[SameTest][#1[[2]], #2[[2]]]&
+		Same = MeshEqual[distTolerance][#1[[1]], #2[[1]]] \[And] OptionValue[SameTest][#1[[2]], #2[[2]]]&;
+		ReflFunc = {MeshReflFunc[distTolerance][#[[1]]], #[[2]]}&,
+		
+		Same = MeshEqual[distTolerance];
+		ReflFunc = MeshReflFunc[distTolerance];
 	];
-	PointSetSymmetry[v, asGroup, ops, AdditionalData -> data, SameTest -> Same]
+	PointSetSymmetry[v, asGroup, AdditionalData -> data, SameTest -> Same,
+		DataReflection -> ReflFunc, ops]
 ]
 
-EncodeMeshConnections[v_List, g_Graph, centroid_List][index_Integer] := Block[{
-		adjacent
+EncodeMeshConnections[v_List, g_Graph, centroid_List, distTolerance_][index_Integer] := Block[{
+		adjacent, base
 	},
+	base = centroid - v[[index]];
+	base = {base, Cross[base]};
 	adjacent = AdjacencyList[g, index];
 	adjacent = Map[
-		{
-			Norm[v[[#]] - v[[index]]],
-			VectorAngle[v[[#]]-v[[index]], centroid-v[[index]]]
-		}&,
+		base . (v[[#]] - v[[index]])&,
 		adjacent
 	];
-	Sort[adjacent]
+	AdjSort[distTolerance][adjacent]
 ]
 
-MeshEqual[distTolerance_, angleTolerance_][a_, b_] :=
+MeshReflFunc[distTolerance_][x_List] := AdjSort[distTolerance][Map[{#[[1]], -#[[2]]}&, x]]
+AdjSort[distTolerance_][x_List] := Sort[x,
+	If[Abs[#1[[1]] - #2[[1]]] > distTolerance,
+		#1[[1]] < #2[[1]], #1[[2]] < #2[[2]]]&]
+AdjSort[0][x_List] := Sort[x, NumericalOrder]
+
+MeshEqual[distTolerance_][a_, b_] :=
 	ListEqual[
 		a, b, Length[a],
 		Abs[#1[[1]] - #2[[1]]] <= distTolerance \[And]
-		Abs[#1[[2]] - #2[[2]]] <= angleTolerance&
+		Abs[#1[[2]] - #2[[2]]] <= distTolerance&
 	]
 
 
-(* ::Subsection:: *)
+(* ::Subsection::Closed:: *)
 (*3D*)
 
 
-(* ::Subsubsection:: *)
+(* ::Subsubsection::Closed:: *)
 (*Symmetry Axes*)
 
 
@@ -659,7 +689,7 @@ AxesFromPermutation[v_List, tolerance_][c_Cycles] := Block[{axes, normals},
 	normals = {};
 	axes = Map[AxesFromCycle[v], First[c]];
 	If[Length[axes] == 0,
-		normals = DeleteDuplicates[normals, 1 - Abs[#1.#2] <= tolerance&];
+		normals = DeleteDuplicates[normals, 1 - Abs[#1 . #2] <= tolerance&];
 		If[Length[normals] >= 2, {normals[[{1, 2}]]}, Nothing],
 		
 		Apply[Intersection[##, SameTest -> SameBasis[tolerance]]&, axes]
@@ -706,7 +736,7 @@ PolyhedronGraph[p_Polyhedron] := With[{
 ]
 
 
-(* ::Subsubsection:: *)
+(* ::Subsubsection::Closed:: *)
 (*Point Set*)
 
 
@@ -739,9 +769,8 @@ With[{axis = basis[[1]] \[Cross] basis[[2]]},
 			OptionValue[Tolerance], workingPrecision
 		];
 		symm = PointSetSymmetry2D[
-			Map[basis.#&, P],
+			Map[basis . #&, P],
 			asGroup,
-			ops,
 			AdditionalData -> If[OptionValue[AdditionalData] === None,
 				Map[Prec[# . axis, workingPrecision]&, P],
 				MapThread[
@@ -759,7 +788,8 @@ With[{axis = basis[[1]] \[Cross] basis[[2]]},
 					Abs[#1[[1]] - #2[[1]]] <= distTolerance \[And]
 					OptionValue[SameTest][#1[[2]], #2[[2]]]&
 				]
-			]
+			],
+			ops
 		];
 		If[asGroup, symm, Add3DData[basis, axis, symm]]
 	]
@@ -783,7 +813,7 @@ Add3DData[basis_List, axis_List][data_] :=
 	]
 
 
-(* ::Subsubsection:: *)
+(* ::Subsubsection::Closed:: *)
 (*Polyhedron*)
 
 
@@ -809,7 +839,7 @@ PolyhedronSymmetry[
 	v_List, g_Graph, asGroup_?BooleanQ, ops:OptionsPattern[]
 ][basis_List] := With[{
 		axis = basis[[1]] \[Cross] basis[[2]],
-		centroid = RegionCentroid[m]
+		centroid = Mean[v]
 	},
 	Block[{workingPrecision, angleTolerance, distTolerance, sameTest,
 			ordering, back, \[CapitalGamma], S, o, k, axes
@@ -825,13 +855,13 @@ PolyhedronSymmetry[
 		];
 		{\[CapitalGamma], S} = PolyhedronEncode[v, g, axis, centroid, basis, ordering, back];
 		o = Map[
-			Length[#] / GetCyclicOffset[#, #, sameTest] &,
+			Length[#] / GCD[Length[#], GetCyclicOffset[#, #, sameTest]] &,
 			S
 		];
 		k = Apply[GCD, o];
 		
 		axes = MapThread[
-			PointSetReflection[1, workingPrecision, sameTest],
+			PointSetReflection[1, workingPrecision, sameTest, Identity],
 			{Map[First, \[CapitalGamma], {2}], S}
 		];
 
@@ -1027,7 +1057,7 @@ PolyhedronReflectionTransform[centroid_List, axis_List, basis_List][angle_] :=
 	]
 
 
-(* ::Subsection:: *)
+(* ::Subsection::Closed:: *)
 (*TransformationGroup*)
 
 
@@ -1077,7 +1107,7 @@ RotationQ[permutation_Cycles, coordinates_List] := With[{
 ]
 
 
-(* ::Subsubsection:: *)
+(* ::Subsubsection::Closed:: *)
 (*TransformationGroup*)
 
 
@@ -1143,13 +1173,13 @@ TransformationProduct[rot_Rotation][refl_Reflection] :=
 	]
 	
 TransformationSpan[refl_List, rot_Rotation] :=
-	FixedPoint[RotateIteration[rot], refl]
+	FixedPoint[RotateIteration[rot], refl, 2\[Pi] / RotationAngle[rot]]
 
 RotateIteration[rot_Rotation][refl_List] :=
 	Union[refl, Map[TransformationProduct[rot], refl]]
 
 
-(* ::Subsubsection:: *)
+(* ::Subsubsection::Closed:: *)
 (*TransformationGroup3D*)
 
 
@@ -1185,7 +1215,7 @@ TransformationGroup3D /: TransformationFunction[group_TransformationGroup3D] :=
 	Map[TransformationFunction, TransformationGroupGenerators[group]]
 
 
-(* ::Subsection:: *)
+(* ::Subsection::Closed:: *)
 (*End the package*)
 
 
